@@ -117,7 +117,7 @@
       $("#pageDescription").textContent = description;
       $("#breadcrumbCurrent").textContent = title;
       $("#primaryAction").classList.toggle("hidden", state.page === "movements");
-      $("#inventoryReport").classList.toggle("hidden", state.page === "movements" || state.page === "office");
+      $("#inventoryReport").classList.toggle("hidden", state.page === "movements");
       $("#primaryAction span").textContent = state.page === "office" ? "Tambah Alat" : state.page === "overview" ? "Tambah Barang" : state.page === "materials" ? "Tambah Material" : "Tambah Produk";
       document.querySelectorAll(".nav-button").forEach((button) => button.classList.toggle("active", button.dataset.page === state.page));
       $("#pageContent").innerHTML = state.page === "overview" ? renderOverview() :
@@ -613,6 +613,102 @@
       }
     }
 
+    function previewOfficeAssetsReport() {
+      const reportWindow = window.open("", "_blank");
+      if (!reportWindow) {
+        showToast("Jendela laporan diblokir. Izinkan pop-up untuk melihat laporan.", "error");
+        return;
+      }
+
+      try {
+        const assets = [...state.officeAssets].sort((a, b) => String(a.name).localeCompare(String(b.name), "id"));
+        const totalQuantity = assets.reduce((total, asset) => total + (Number(asset.quantity ?? 1) || 0), 0);
+        const generatedAt = new Intl.DateTimeFormat("id-ID", { dateStyle: "full", timeStyle: "short" }).format(new Date());
+        const logoUrl = escapeHtml(new URL("logo pdf.png", document.baseURI).href);
+        const rows = assets.length ? assets.map((asset) => `<tr>
+          <td><strong>${escapeHtml(asset.name)}</strong><span>${escapeHtml(asset.asset_code || "Tanpa kode")}</span></td>
+          <td>${escapeHtml(asset.category || "Lainnya")}</td>
+          <td>${escapeHtml(formatNumber(asset.quantity ?? 1))} unit</td>
+          <td>${escapeHtml(officeAssetConditionLabels[asset.condition] || "Tidak diketahui")}</td>
+          <td>${escapeHtml(asset.location || "-")}</td>
+          <td>${escapeHtml(asset.notes || "-")}</td>
+        </tr>`).join("") : `<tr><td class="empty" colspan="6">Belum ada alat inventaris kantor.</td></tr>`;
+        const reportHtml = `<!DOCTYPE html>
+          <html lang="id">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Laporan Alat Inventaris Kantor</title>
+            <style>
+              * { box-sizing: border-box; }
+              body { margin: 0; color: #17243b; font: 12px Arial, sans-serif; }
+              .report { max-width: 1120px; margin: 0 auto; padding: 32px; }
+              header { display: flex; align-items: center; gap: 16px; padding-bottom: 18px; border-bottom: 2px solid #102a56; }
+              header img { width: 58px; height: 58px; object-fit: contain; }
+              header p { margin: 0 0 4px; color: #102a56; font-weight: 700; }
+              h1 { margin: 0; color: #102a56; font-size: 21px; }
+              .generated { margin-top: 7px; color: #748197; font-size: 10px; font-weight: 400; }
+              .summary { margin: 18px 0; color: #526179; }
+              table { width: 100%; border-collapse: collapse; }
+              th { padding: 9px 7px; background: #f3f6fb; color: #526179; font-size: 9px; text-align: left; text-transform: uppercase; }
+              td { padding: 9px 8px; border-bottom: 1px solid #e7ebf2; color: #40506a; vertical-align: top; }
+              td span { display: block; margin-top: 3px; color: #8490a2; font-size: 10px; }
+              .empty { padding: 18px 8px; color: #748197; text-align: center; }
+              @page { size: A4 landscape; margin: 14mm; }
+              @media print { .report { max-width: none; padding: 0; } thead { display: table-header-group; } tr { break-inside: avoid; } }
+            </style>
+          </head>
+          <body><main class="report">
+            <header><img src="${logoUrl}" alt="Logo Feno Berjaya"><div><p>FENO BERJAYA</p><h1>Laporan Alat Inventaris Kantor</h1><p class="generated">Dibuat pada ${escapeHtml(generatedAt)}</p></div></header>
+            <p class="summary">${formatNumber(assets.length)} jenis alat · ${formatNumber(totalQuantity)} unit</p>
+            <table><thead><tr><th>Nama / kode alat</th><th>Kategori</th><th>Jumlah</th><th>Kondisi barang</th><th>Lokasi</th><th>Catatan</th></tr></thead><tbody>${rows}</tbody></table>
+          </main></body>
+          </html>`;
+        reportWindow.document.open();
+        reportWindow.document.write(reportHtml);
+        reportWindow.document.close();
+      } catch (error) {
+        console.error("Gagal menyiapkan pratinjau inventaris kantor:", error);
+        reportWindow.close();
+        showToast(error.message || "Pratinjau laporan gagal disiapkan.", "error");
+      }
+    }
+
+    function downloadOfficeAssetsPdf() {
+      try {
+        const assets = [...state.officeAssets].sort((a, b) => String(a.name).localeCompare(String(b.name), "id"));
+        const title = "Laporan Alat Inventaris Kantor";
+        const description = `Daftar alat inventaris kantor per ${formatDate(new Date())}`;
+        const { doc, logoDataUrl } = createPdfDocument(title, description);
+        const totalQuantity = assets.reduce((total, asset) => total + (Number(asset.quantity ?? 1) || 0), 0);
+        doc.setFontSize(9);
+        doc.setTextColor(55, 65, 81);
+        doc.text(`Total jenis alat: ${formatNumber(assets.length)}     Total unit: ${formatNumber(totalQuantity)}`, 14, 51);
+        const rows = assets.map((asset) => [
+          asset.name || "",
+          asset.asset_code || "Tanpa kode",
+          asset.category || "Lainnya",
+          `${formatNumber(asset.quantity ?? 1)} unit`,
+          officeAssetConditionLabels[asset.condition] || "Tidak diketahui",
+          asset.location || "-",
+          asset.notes || "-"
+        ]);
+        pdfTableOptions(
+          doc,
+          logoDataUrl,
+          description,
+          57,
+          ["Nama alat", "Kode inventaris", "Kategori", "Jumlah", "Kondisi barang", "Lokasi", "Catatan"],
+          rows.length ? rows : [["Belum ada data", "-", "-", "-", "-", "-", "-"]]
+        );
+        doc.save(`laporan-alat-inventaris-${new Date().toISOString().slice(0, 10)}.pdf`);
+        showToast("Laporan alat inventaris berhasil diunduh.");
+      } catch (error) {
+        console.error("Gagal mengunduh PDF inventaris kantor:", error);
+        showToast(error.message || "Laporan alat inventaris gagal diunduh.", "error");
+      }
+    }
+
     function renderMovementsPage() {
       const movements = state.movements;
       const content = movements.length ? `<div class="table-wrap"><table><thead><tr><th>Tanggal & waktu</th><th>Nama barang</th><th>Kategori</th><th>Jenis transaksi</th><th>Jumlah</th><th>Catatan</th></tr></thead><tbody>${movements.map((movement) => {
@@ -1088,7 +1184,10 @@
       if (shortcut?.dataset.shortcut === "reduce-product") openMovementModal(null, { category: "product", movementType: "out" });
       if (event.target.closest("#mobileMenu")) $("#sidebar").classList.toggle("open");
       if (event.target.closest("#inventoryReport")) {
-        showPdfActions(previewInventoryReport, downloadInventoryPdf);
+        showPdfActions(
+          state.page === "office" ? previewOfficeAssetsReport : previewInventoryReport,
+          state.page === "office" ? downloadOfficeAssetsPdf : downloadInventoryPdf
+        );
       }
       if (event.target.closest("#exportMovementsPdf")) {
         showPdfActions(previewMovementsPdf, downloadMovementsPdf);
